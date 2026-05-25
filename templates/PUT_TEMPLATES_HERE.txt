@@ -1,0 +1,1 @@
+Place your shirt_template.png and pants_template.png in this folder.

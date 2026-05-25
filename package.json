@@ -1,0 +1,14 @@
+{
+  "name": "roblox-template-bot",
+  "version": "1.0.0",
+  "description": "Discord bot that overlays images onto Roblox shirt/pants templates",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "discord.js": "^14.14.1",
+    "dotenv": "^17.4.2",
+    "jimp": "^0.22.10"
+  }
+}
