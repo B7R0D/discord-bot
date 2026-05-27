@@ -16,7 +16,6 @@ const client = new Client({
 
 const PREFIX = '!';
 
-// Download image from URL to buffer
 function downloadImage(url) {
   return new Promise((resolve, reject) => {
     const protocol = url.startsWith('https') ? https : http;
@@ -29,25 +28,23 @@ function downloadImage(url) {
   });
 }
 
-// Overlay user image onto template
 async function applyTemplate(userImageBuffer, templatePath) {
-  // Load template (must be PNG with transparency)
   const template = await Jimp.read(templatePath);
   const templateW = template.bitmap.width;
   const templateH = template.bitmap.height;
 
-  // Load user image and resize to match template
+  // Load user image and resize to EXACTLY match template size (high quality)
   const userImage = await Jimp.read(userImageBuffer);
-  userImage.resize(templateW, templateH);
+  userImage.resize(templateW, templateH, Jimp.RESIZE_BICUBIC);
 
-  // Composite: user image goes UNDER the template
-  // So template's opaque parts show on top, transparent parts reveal user image
+  // Composite template ON TOP of user image
   userImage.composite(template, 0, 0, {
     mode: Jimp.BLEND_SOURCE_OVER,
     opacitySource: 1,
     opacityDest: 1,
   });
 
+  // Output at full quality PNG (no compression loss)
   return await userImage.getBufferAsync(Jimp.MIME_PNG);
 }
 
@@ -64,26 +61,20 @@ client.on('messageCreate', async (message) => {
 
   if (command !== 'shirt' && command !== 'pants') return;
 
-  // Determine which template to use
   const templateFile = command === 'shirt' ? 'shirt_template.png' : 'pants_template.png';
   const templatePath = path.join(__dirname, 'templates', templateFile);
 
-  // Check template exists
   if (!fs.existsSync(templatePath)) {
     return message.reply(
       `❌ Missing template file \`templates/${templateFile}\`. Please add it to the \`templates/\` folder.`
     );
   }
 
-  // Check for attachment
   const attachment = message.attachments.first();
   if (!attachment) {
-    return message.reply(
-      `❌ Please attach an image! Example: \`!${command}\` with an image uploaded.`
-    );
+    return message.reply(`❌ Please attach an image! Example: \`!${command}\` with an image uploaded.`);
   }
 
-  // Make sure it's an image
   if (!attachment.contentType || !attachment.contentType.startsWith('image/')) {
     return message.reply('❌ That file doesn\'t look like an image. Please upload a PNG or JPG.');
   }
