@@ -33,18 +33,15 @@ async function applyTemplate(userImageBuffer, templatePath) {
   const templateW = template.bitmap.width;
   const templateH = template.bitmap.height;
 
-  // Load user image and resize to EXACTLY match template size (high quality)
   const userImage = await Jimp.read(userImageBuffer);
   userImage.resize(templateW, templateH, Jimp.RESIZE_BICUBIC);
 
-  // Composite template ON TOP of user image
   userImage.composite(template, 0, 0, {
     mode: Jimp.BLEND_SOURCE_OVER,
     opacitySource: 1,
     opacityDest: 1,
   });
 
-  // Output at full quality PNG (no compression loss)
   return await userImage.getBufferAsync(Jimp.MIME_PNG);
 }
 
@@ -65,35 +62,47 @@ client.on('messageCreate', async (message) => {
   const templatePath = path.join(__dirname, 'templates', templateFile);
 
   if (!fs.existsSync(templatePath)) {
-    return message.reply(
-      `❌ Missing template file \`templates/${templateFile}\`. Please add it to the \`templates/\` folder.`
-    );
+    return message.reply(`❌ Missing template file \`templates/${templateFile}\`.`);
   }
 
-  const attachment = message.attachments.first();
-  if (!attachment) {
-    return message.reply(`❌ Please attach an image! Example: \`!${command}\` with an image uploaded.`);
+  // Filter only image attachments
+  const imageAttachments = message.attachments.filter(
+    (att) => att.contentType && att.contentType.startsWith('image/')
+  );
+
+  if (imageAttachments.size === 0) {
+    const warn = await message.reply(`❌ Please attach at least one image with \`!${command}\`!`);
+    // Delete warning after 5 seconds
+    setTimeout(() => warn.delete().catch(() => {}), 5000);
+    return;
   }
 
-  if (!attachment.contentType || !attachment.contentType.startsWith('image/')) {
-    return message.reply('❌ That file doesn\'t look like an image. Please upload a PNG or JPG.');
-  }
+  // Delete the user's command message
+  message.delete().catch(() => {});
 
-  const processing = await message.reply('⏳ Processing your image...');
+  const processing = await message.channel.send(
+    `⏳ Processing ${imageAttachments.size} image${imageAttachments.size > 1 ? 's' : ''}...`
+  );
 
   try {
-    const imageBuffer = await downloadImage(attachment.url);
-    const resultBuffer = await applyTemplate(imageBuffer, templatePath);
-
-    const file = new AttachmentBuilder(resultBuffer, { name: `${command}_result.png` });
+    // Process all images in parallel
+    const results = await Promise.all(
+      imageAttachments.map(async (att, index) => {
+        const imageBuffer = await downloadImage(att.url);
+        const resultBuffer = await applyTemplate(imageBuffer, templatePath);
+        return new AttachmentBuilder(resultBuffer, {
+          name: `${command}_result_${index + 1}.png`,
+        });
+      })
+    );
 
     await processing.edit({
-      content: `✅ Here's your Roblox ${command} template!`,
-      files: [file],
+      content: `✅ Here ${results.length > 1 ? 'are' : 'is'} your ${results.length} Roblox ${command}${results.length > 1 ? 's' : ''}!`,
+      files: results,
     });
   } catch (err) {
     console.error(err);
-    await processing.edit('❌ Something went wrong processing your image. Make sure it\'s a valid PNG or JPG.');
+    await processing.edit('❌ Something went wrong processing your images. Make sure they are valid PNG or JPG files.');
   }
 });
 
