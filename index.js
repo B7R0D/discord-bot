@@ -20,18 +20,17 @@ function downloadImage(url) {
   return new Promise((resolve, reject) => {
     const protocol = url.startsWith('https') ? https : http;
     protocol.get(url, { headers: { 'User-Agent': 'Mozilla/5.0' } }, (res) => {
-      // Follow redirects
       if (res.statusCode === 301 || res.statusCode === 302) {
         return downloadImage(res.headers.location).then(resolve).catch(reject);
       }
       if (res.statusCode !== 200) {
-        return reject(new Error(`Failed to download image: HTTP ${res.statusCode}`));
+        return reject(new Error(`HTTP ${res.statusCode}`));
       }
       const chunks = [];
       res.on('data', (chunk) => chunks.push(chunk));
       res.on('end', () => {
         const buf = Buffer.concat(chunks);
-        if (buf.length === 0) return reject(new Error('Downloaded empty buffer'));
+        if (buf.length === 0) return reject(new Error('Empty buffer'));
         resolve(buf);
       });
       res.on('error', reject);
@@ -86,20 +85,22 @@ client.on('messageCreate', async (message) => {
     return;
   }
 
-  // Snapshot URLs immediately before deleting the message
-  const attachmentList = imageAttachments.map((att, i) => ({ url: att.url, index: i }));
+  // Download ALL images FIRST before deleting the message
+  const downloadedBuffers = await Promise.all(
+    imageAttachments.map((att) => downloadImage(att.url))
+  );
 
+  // Now safe to delete the message
   message.delete().catch(() => {});
 
   const processing = await message.channel.send(
-    `⏳ Processing ${attachmentList.length} image${attachmentList.length > 1 ? 's' : ''}...`
+    `⏳ Processing ${downloadedBuffers.length} image${downloadedBuffers.length > 1 ? 's' : ''}...`
   );
 
   try {
     const results = await Promise.all(
-      attachmentList.map(async ({ url, index }) => {
-        const imageBuffer = await downloadImage(url);
-        const resultBuffer = await applyTemplate(imageBuffer, templatePath);
+      downloadedBuffers.map(async (buffer, index) => {
+        const resultBuffer = await applyTemplate(buffer, templatePath);
         return new AttachmentBuilder(resultBuffer, {
           name: `${command}_result_${index + 1}.png`,
         });
