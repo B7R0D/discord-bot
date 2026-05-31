@@ -1,6 +1,6 @@
 require('dotenv').config();
 const { Client, GatewayIntentBits, AttachmentBuilder } = require('discord.js');
-const Jimp = require('jimp');
+const sharp = require('sharp');
 const path = require('path');
 const fs = require('fs');
 const https = require('https');
@@ -29,20 +29,23 @@ function downloadImage(url) {
 }
 
 async function applyTemplate(userImageBuffer, templatePath) {
-  const template = await Jimp.read(templatePath);
-  const templateW = template.bitmap.width;
-  const templateH = template.bitmap.height;
+  // Get template dimensions
+  const templateMeta = await sharp(templatePath).metadata();
+  const { width, height } = templateMeta;
 
-  const userImage = await Jimp.read(userImageBuffer);
-  userImage.resize(templateW, templateH, Jimp.RESIZE_BICUBIC);
+  // Resize user image to match template size
+  const resizedUser = await sharp(userImageBuffer)
+    .resize(width, height, { fit: 'fill' })
+    .png()
+    .toBuffer();
 
-  userImage.composite(template, 0, 0, {
-    mode: Jimp.BLEND_SOURCE_OVER,
-    opacitySource: 1,
-    opacityDest: 1,
-  });
+  // Composite: template on top of user image
+  const result = await sharp(resizedUser)
+    .composite([{ input: templatePath, blend: 'over' }])
+    .png({ compressionLevel: 0 }) // max quality
+    .toBuffer();
 
-  return await userImage.getBufferAsync(Jimp.MIME_PNG);
+  return result;
 }
 
 client.once('ready', () => {
@@ -65,19 +68,16 @@ client.on('messageCreate', async (message) => {
     return message.reply(`❌ Missing template file \`templates/${templateFile}\`.`);
   }
 
-  // Filter only image attachments
   const imageAttachments = message.attachments.filter(
     (att) => att.contentType && att.contentType.startsWith('image/')
   );
 
   if (imageAttachments.size === 0) {
     const warn = await message.reply(`❌ Please attach at least one image with \`!${command}\`!`);
-    // Delete warning after 5 seconds
     setTimeout(() => warn.delete().catch(() => {}), 5000);
     return;
   }
 
-  // Delete the user's command message
   message.delete().catch(() => {});
 
   const processing = await message.channel.send(
@@ -85,7 +85,6 @@ client.on('messageCreate', async (message) => {
   );
 
   try {
-    // Process all images in parallel
     const results = await Promise.all(
       imageAttachments.map(async (att, index) => {
         const imageBuffer = await downloadImage(att.url);
@@ -102,7 +101,7 @@ client.on('messageCreate', async (message) => {
     });
   } catch (err) {
     console.error(err);
-    await processing.edit('❌ Something went wrong processing your images. Make sure they are valid PNG or JPG files.');
+    await processing.edit('❌ Something went wrong. Make sure your images are valid PNG or JPG files.');
   }
 });
 
