@@ -19,30 +19,38 @@ const PREFIX = '!';
 function downloadImage(url) {
   return new Promise((resolve, reject) => {
     const protocol = url.startsWith('https') ? https : http;
-    protocol.get(url, (res) => {
+    protocol.get(url, { headers: { 'User-Agent': 'Mozilla/5.0' } }, (res) => {
+      // Follow redirects
+      if (res.statusCode === 301 || res.statusCode === 302) {
+        return downloadImage(res.headers.location).then(resolve).catch(reject);
+      }
+      if (res.statusCode !== 200) {
+        return reject(new Error(`Failed to download image: HTTP ${res.statusCode}`));
+      }
       const chunks = [];
       res.on('data', (chunk) => chunks.push(chunk));
-      res.on('end', () => resolve(Buffer.concat(chunks)));
+      res.on('end', () => {
+        const buf = Buffer.concat(chunks);
+        if (buf.length === 0) return reject(new Error('Downloaded empty buffer'));
+        resolve(buf);
+      });
       res.on('error', reject);
     }).on('error', reject);
   });
 }
 
 async function applyTemplate(userImageBuffer, templatePath) {
-  // Get template dimensions
   const templateMeta = await sharp(templatePath).metadata();
   const { width, height } = templateMeta;
 
-  // Resize user image to match template size
   const resizedUser = await sharp(userImageBuffer)
     .resize(width, height, { fit: 'fill' })
     .png()
     .toBuffer();
 
-  // Composite: template on top of user image
   const result = await sharp(resizedUser)
     .composite([{ input: templatePath, blend: 'over' }])
-    .png({ compressionLevel: 0 }) // max quality
+    .png({ compressionLevel: 0 })
     .toBuffer();
 
   return result;
@@ -78,16 +86,19 @@ client.on('messageCreate', async (message) => {
     return;
   }
 
+  // Snapshot URLs immediately before deleting the message
+  const attachmentList = imageAttachments.map((att, i) => ({ url: att.url, index: i }));
+
   message.delete().catch(() => {});
 
   const processing = await message.channel.send(
-    `⏳ Processing ${imageAttachments.size} image${imageAttachments.size > 1 ? 's' : ''}...`
+    `⏳ Processing ${attachmentList.length} image${attachmentList.length > 1 ? 's' : ''}...`
   );
 
   try {
     const results = await Promise.all(
-      imageAttachments.map(async (att, index) => {
-        const imageBuffer = await downloadImage(att.url);
+      attachmentList.map(async ({ url, index }) => {
+        const imageBuffer = await downloadImage(url);
         const resultBuffer = await applyTemplate(imageBuffer, templatePath);
         return new AttachmentBuilder(resultBuffer, {
           name: `${command}_result_${index + 1}.png`,
@@ -101,7 +112,7 @@ client.on('messageCreate', async (message) => {
     });
   } catch (err) {
     console.error(err);
-    await processing.edit('❌ Something went wrong. Make sure your images are valid PNG or JPG files.');
+    await processing.edit('❌ Something went wrong: ' + err.message);
   }
 });
 
