@@ -87,7 +87,7 @@ client.on('messageCreate', async (message) => {
 
   // Download ALL images FIRST before deleting the message
   const downloadedBuffers = await Promise.all(
-    imageAttachments.map((att) => downloadImage(att.url))
+    imageAttachments.map((att) => downloadImage(att.url).then(buf => ({ buf, name: att.name || `${command}.png` })))
   );
 
   // Now safe to delete the message
@@ -99,11 +99,9 @@ client.on('messageCreate', async (message) => {
 
   try {
     const results = await Promise.all(
-      downloadedBuffers.map(async (buffer, index) => {
-        const resultBuffer = await applyTemplate(buffer, templatePath);
-        return new AttachmentBuilder(resultBuffer, {
-          name: `${command}_result_${index + 1}.png`,
-        });
+      downloadedBuffers.map(async ({ buf, name }) => {
+        const resultBuffer = await applyTemplate(buf, templatePath);
+        return new AttachmentBuilder(resultBuffer, { name });
       })
     );
 
